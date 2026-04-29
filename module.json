@@ -1,8 +1,8 @@
 {
   "id": "wyv",
   "title": "Wyv — RPG Assistant",
-  "description": "Assistente de RPG integrado ao chat do FoundryVTT. Digite @wyv seguido da sua dúvida.",
-  "version": "1.0.0",
+  "description": "RPG assistant integrated into the FoundryVTT chat. Type @wyv followed by your question to get help with rules, characters, spells, and more.",
+  "version": "1.0.2",
   "compatibility": {
     "minimum": "11",
     "verified": "13"

@@ -8,48 +8,123 @@
 
 const MODULE_ID = "wyv";
 
+// ─── Traduções ────────────────────────────────────────────────────────────────
+
+const TRANSLATIONS = {
+  "pt-BR": {
+    // Settings
+    "settings.apiUrl.name":       "URL da API Wyv",
+    "settings.apiUrl.hint":       "Endereço do backend. Ex: http://localhost:8000 ou https://foundry-wyv-api.azurewebsites.net",
+    "settings.apiKey.name":       "API Key (X-API-Key)",
+    "settings.apiKey.hint":       "Chave secreta configurada no WYV_API_KEY do backend. Deixe vazio para desabilitar autenticação.",
+    "settings.language.name":     "Idioma das respostas",
+    "settings.language.hint":     "Idioma usado nas respostas e na interface do Wyv. Ex: pt-BR, en",
+    "settings.historySize.name":  "Tamanho do histórico",
+    "settings.historySize.hint":  "Número de trocas anteriores enviadas como contexto ao LLM. 0 desativa o histórico.",
+    // Notificações
+    "notify.typeQuestion":        "Wyv | Digite uma pergunta após @wyv.",
+    // Chat
+    "chat.thinking":              "🐉 Wyv está pensando...",
+    "chat.error":                 "⚠️ Wyv não conseguiu responder",
+  },
+  "en": {
+    // Settings
+    "settings.apiUrl.name":       "Wyv API URL",
+    "settings.apiUrl.hint":       "Backend address. E.g.: http://localhost:8000 or https://foundry-wyv-api.azurewebsites.net",
+    "settings.apiKey.name":       "API Key (X-API-Key)",
+    "settings.apiKey.hint":       "Secret key configured in WYV_API_KEY on the backend. Leave empty to disable authentication.",
+    "settings.language.name":     "Response Language",
+    "settings.language.hint":     "Language used for Wyv responses and interface. E.g.: pt-BR, en",
+    "settings.historySize.name":  "History Size",
+    "settings.historySize.hint":  "Number of previous exchanges sent as context to the LLM. Set to 0 to disable history.",
+    // Notifications
+    "notify.typeQuestion":        "Wyv | Please type a question after @wyv.",
+    // Chat
+    "chat.thinking":              "🐉 Wyv is thinking...",
+    "chat.error":                 "⚠️ Wyv could not respond",
+  },
+};
+
+/**
+ * Retorna a string traduzida com base no setting `language` do módulo.
+ * Fallback para inglês se a chave não existir no idioma configurado.
+ */
+function t(key) {
+  let lang;
+  try {
+    lang = game.settings.get(MODULE_ID, "language") || "en";
+  } catch {
+    lang = "en";
+  }
+
+  // Normaliza: "pt-BR" → "pt-BR", qualquer outra coisa → "en"
+  const resolved = TRANSLATIONS[lang] ? lang : "en";
+  return TRANSLATIONS[resolved]?.[key] ?? TRANSLATIONS["en"]?.[key] ?? key;
+}
+
 // ─── Registro de Settings ────────────────────────────────────────────────────
 
 Hooks.once("init", () => {
   game.settings.register(MODULE_ID, "apiUrl", {
-    name: "URL da API Wyv",
-    hint: "Endereço do backend. Ex: http://localhost:8000 ou https://foundry-wyv-api.azurewebsites.net",
-    scope: "world",
-    config: true,
-    type: String,
+    name:    "Wyv API URL",
+    hint:    "Backend URL.",
+    scope:   "world",
+    config:  true,
+    type:    String,
     default: "http://localhost:8000",
+    onChange: () => {},
   });
 
   game.settings.register(MODULE_ID, "apiKey", {
-    name: "API Key (X-API-Key)",
-    hint: "Chave secreta configurada no WYV_API_KEY do backend. Deixe vazio se auth estiver desabilitada.",
-    scope: "world",
-    config: true,
-    type: String,
+    name:    "API Key (X-API-Key)",
+    hint:    "Secret key for backend authentication.",
+    scope:   "world",
+    config:  true,
+    type:    String,
     default: "",
   });
 
   game.settings.register(MODULE_ID, "language", {
-    name: "Idioma das respostas",
-    hint: "Código do idioma para as respostas do Wyv. Ex: pt-BR, en-US, es-ES",
-    scope: "client",
-    config: true,
-    type: String,
+    name:    "Language / Idioma",
+    hint:    "Interface and response language. Ex: pt-BR, en",
+    scope:   "client",
+    config:  true,
+    type:    String,
     default: "pt-BR",
   });
 
   game.settings.register(MODULE_ID, "historySize", {
-    name: "Tamanho do histórico",
-    hint: "Número de trocas anteriores com o Wyv que serão enviadas como contexto. 0 desativa o histórico.",
-    scope: "client",
-    config: true,
-    type: Number,
-    range: { min: 0, max: 20, step: 1 },
+    name:    "History Size",
+    hint:    "Number of previous exchanges sent as context. 0 = disabled.",
+    scope:   "world",
+    config:  true,
+    type:    Number,
+    range:   { min: 0, max: 20, step: 1 },
     default: 5,
   });
 
-  console.log(`${MODULE_ID} | Módulo inicializado.`);
+  // Após o init, atualiza os labels das settings com o idioma configurado
+  Hooks.once("ready", _updateSettingLabels);
+
+  console.log(`${MODULE_ID} | Module initialized.`);
 });
+
+/**
+ * Atualiza os labels e hints das settings com base no idioma do módulo.
+ * O Foundry já renderizou o painel, então atualizamos os textos via DOM
+ * na próxima vez que o painel for aberto — re-registramos as settings
+ * com os nomes traduzidos.
+ */
+function _updateSettingLabels() {
+  const keys = ["apiUrl", "apiKey", "language", "historySize"];
+  for (const key of keys) {
+    const setting = game.settings.settings.get(`${MODULE_ID}.${key}`);
+    if (setting) {
+      setting.name = t(`settings.${key}.name`);
+      setting.hint = t(`settings.${key}.hint`);
+    }
+  }
+}
 
 // ─── Interceptação do Chat ───────────────────────────────────────────────────
 
@@ -63,7 +138,7 @@ Hooks.on("chatMessage", (chatLog, message, data) => {
   const userMessage = message.slice(trigger.length).trim();
 
   if (!userMessage) {
-    ui.notifications.warn("Wyv | Escreva uma pergunta após @wyv.");
+    ui.notifications.warn(t("notify.typeQuestion"));
     return false;
   }
 
@@ -92,7 +167,7 @@ async function _handleWyvRequest(userMessage) {
   };
 
   const waitingMsg = await _postChatMessage(
-    `<em>🐉 Wyv está pensando...</em>`,
+    `<em>${t("chat.thinking")}</em>`,
     true
   );
 
@@ -114,8 +189,6 @@ async function _handleWyvRequest(userMessage) {
     const data = await response.json();
 
     await waitingMsg?.delete();
-
-    // Salva question + answer nos flags para reconstruir o histórico depois
     await _postChatMessage(
       _formatResponse(userMessage, data.answer),
       false,
@@ -123,38 +196,27 @@ async function _handleWyvRequest(userMessage) {
     );
 
   } catch (error) {
-    console.error(`${MODULE_ID} | Erro ao consultar API:`, error);
+    console.error(`${MODULE_ID} | API error:`, error);
     await waitingMsg?.delete();
     await _postChatMessage(
-      `<span class="wyv-error">⚠️ Wyv não conseguiu responder: ${error.message}</span>`
+      `<span class="wyv-error">${t("chat.error")}: ${error.message}</span>`
     );
   }
 }
 
 // ─── Histórico ────────────────────────────────────────────────────────────────
 
-/**
- * Reconstrói o histórico de conversa a partir das mensagens do chat do Foundry.
- * Filtra mensagens com flags.wyv.question e flags.wyv.answer,
- * respeitando o limite de historySize trocas.
- *
- * @param {number} historySize - Número máximo de trocas a incluir
- * @returns {Array<{role: string, content: string}>}
- */
 function _buildHistory(historySize) {
   if (historySize <= 0) return [];
 
-  // game.messages já vem ordenado do mais antigo pro mais recente
   const wyvMessages = game.messages.contents.filter(
     (msg) =>
       msg.flags?.[MODULE_ID]?.question &&
       msg.flags?.[MODULE_ID]?.answer
   );
 
-  // Pega as últimas N trocas
   const recent = wyvMessages.slice(-historySize);
 
-  // Monta no formato esperado pelo OpenAI: [{role, content}, ...]
   const history = [];
   for (const msg of recent) {
     history.push({ role: "user",      content: msg.flags[MODULE_ID].question });
@@ -172,7 +234,7 @@ function _getActorContext() {
 
   if (!actor) return null;
 
-  const sys = actor.system;
+  const sys     = actor.system;
   const context = { name: actor.name };
 
   if (sys.details?.level !== undefined) {
@@ -210,18 +272,12 @@ function _getActorContext() {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/**
- * Posta uma mensagem OOC no chat como (IA) Wyv.
- * @param {string}      content    HTML da mensagem
- * @param {boolean}     temporary  Suprime som de notificação
- * @param {object|null} wyvFlags   Dados extras salvos nos flags (question/answer)
- */
 async function _postChatMessage(content, temporary = false, wyvFlags = null) {
   const msgData = {
     content,
     speaker: { alias: "(IA) Wyv" },
-    type: CONST.CHAT_MESSAGE_TYPES?.OOC ?? CONST.CHAT_MESSAGE_STYLES?.OOC ?? 2,
-    sound: temporary ? null : CONFIG.sounds.notification,
+    type:    CONST.CHAT_MESSAGE_TYPES?.OOC ?? CONST.CHAT_MESSAGE_STYLES?.OOC ?? 2,
+    sound:   temporary ? null : CONFIG.sounds.notification,
     flags: {
       [MODULE_ID]: {
         isWyvMessage: true,
@@ -244,11 +300,11 @@ function _formatResponse(question, answer) {
 
 function _markdownToHtml(text) {
   return text
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g,     "<em>$1</em>")
-    .replace(/^- (.+)$/gm,     "<li>$1</li>")
+    .replace(/\*\*(.+?)\*\*/g,  "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g,      "<em>$1</em>")
+    .replace(/^- (.+)$/gm,      "<li>$1</li>")
     .replace(/(<li>.*<\/li>)/s, "<ul>$1</ul>")
-    .replace(/\n/g,            "<br>");
+    .replace(/\n/g,             "<br>");
 }
 
 function _cleanObject(obj) {
