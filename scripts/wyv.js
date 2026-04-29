@@ -2,7 +2,8 @@
  * Wyv — RPG Assistant para FoundryVTT
  *
  * Intercepta mensagens no chat que começam com @wyv,
- * coleta o contexto do token selecionado e consulta a API Wyv.
+ * coleta o contexto do token selecionado, reconstrói o histórico
+ * a partir do chat do Foundry e consulta a API Wyv.
  */
 
 const MODULE_ID = "wyv";
@@ -10,7 +11,6 @@ const MODULE_ID = "wyv";
 // ─── Registro de Settings ────────────────────────────────────────────────────
 
 Hooks.once("init", () => {
-  // URL base da API (somente GM pode alterar)
   game.settings.register(MODULE_ID, "apiUrl", {
     name: "URL da API Wyv",
     hint: "Endereço do backend. Ex: http://localhost:8000 ou https://foundry-wyv-api.azurewebsites.net",
@@ -20,7 +20,6 @@ Hooks.once("init", () => {
     default: "http://localhost:8000",
   });
 
-  // API Key para autenticação (somente GM pode alterar)
   game.settings.register(MODULE_ID, "apiKey", {
     name: "API Key (X-API-Key)",
     hint: "Chave secreta configurada no WYV_API_KEY do backend. Deixe vazio se auth estiver desabilitada.",
@@ -30,7 +29,6 @@ Hooks.once("init", () => {
     default: "",
   });
 
-  // Idioma das respostas (cada jogador pode mudar o seu)
   game.settings.register(MODULE_ID, "language", {
     name: "Idioma das respostas",
     hint: "Código do idioma para as respostas do Wyv. Ex: pt-BR, en-US, es-ES",
@@ -38,6 +36,16 @@ Hooks.once("init", () => {
     config: true,
     type: String,
     default: "pt-BR",
+  });
+
+  game.settings.register(MODULE_ID, "historySize", {
+    name: "Tamanho do histórico",
+    hint: "Número de trocas anteriores com o Wyv que serão enviadas como contexto. 0 desativa o histórico.",
+    scope: "client",
+    config: true,
+    type: Number,
+    range: { min: 0, max: 20, step: 1 },
+    default: 5,
   });
 
   console.log(`${MODULE_ID} | Módulo inicializado.`);
@@ -49,7 +57,7 @@ Hooks.on("chatMessage", (chatLog, message, data) => {
   const trigger = "@wyv ";
 
   if (!message.toLowerCase().startsWith(trigger)) {
-    return true; // deixa a mensagem passar normalmente
+    return true;
   }
 
   const userMessage = message.slice(trigger.length).trim();
@@ -59,7 +67,6 @@ Hooks.on("chatMessage", (chatLog, message, data) => {
     return false;
   }
 
-  // Dispara a consulta e suprime a mensagem original do chat
   _handleWyvRequest(userMessage);
   return false;
 });
@@ -67,21 +74,23 @@ Hooks.on("chatMessage", (chatLog, message, data) => {
 // ─── Lógica principal ────────────────────────────────────────────────────────
 
 async function _handleWyvRequest(userMessage) {
-  const apiUrl    = game.settings.get(MODULE_ID, "apiUrl").replace(/\/$/, "");
-  const apiKey    = game.settings.get(MODULE_ID, "apiKey");
-  const language  = game.settings.get(MODULE_ID, "language");
+  const apiUrl      = game.settings.get(MODULE_ID, "apiUrl").replace(/\/$/, "");
+  const apiKey      = game.settings.get(MODULE_ID, "apiKey");
+  const language    = game.settings.get(MODULE_ID, "language");
+  const historySize = game.settings.get(MODULE_ID, "historySize");
+  const isGM        = game.user.isGM;
 
-  // Monta o payload
   const payload = {
-    message:     userMessage,
-    language:    language,
-    userName:    game.user.name,
-    worldName:   game.world.title,
-    systemId:    game.system.id,
+    message:      userMessage,
+    language:     language,
+    userName:     game.user.name,
+    worldName:    game.world.title,
+    systemId:     game.system.id,
+    isGM:         isGM,
     actorContext: _getActorContext(),
+    history:      _buildHistory(historySize),
   };
 
-  // Feedback visual enquanto aguarda
   const waitingMsg = await _postChatMessage(
     `<em>🐉 Wyv está pensando...</em>`,
     true
@@ -104,9 +113,14 @@ async function _handleWyvRequest(userMessage) {
 
     const data = await response.json();
 
-    // Remove a mensagem de "pensando..." e exibe a resposta
     await waitingMsg?.delete();
-    await _postChatMessage(_formatResponse(userMessage, data.answer));
+
+    // Salva question + answer nos flags para reconstruir o histórico depois
+    await _postChatMessage(
+      _formatResponse(userMessage, data.answer),
+      false,
+      { question: userMessage, answer: data.answer }
+    );
 
   } catch (error) {
     console.error(`${MODULE_ID} | Erro ao consultar API:`, error);
@@ -117,87 +131,108 @@ async function _handleWyvRequest(userMessage) {
   }
 }
 
+// ─── Histórico ────────────────────────────────────────────────────────────────
+
+/**
+ * Reconstrói o histórico de conversa a partir das mensagens do chat do Foundry.
+ * Filtra mensagens com flags.wyv.question e flags.wyv.answer,
+ * respeitando o limite de historySize trocas.
+ *
+ * @param {number} historySize - Número máximo de trocas a incluir
+ * @returns {Array<{role: string, content: string}>}
+ */
+function _buildHistory(historySize) {
+  if (historySize <= 0) return [];
+
+  // game.messages já vem ordenado do mais antigo pro mais recente
+  const wyvMessages = game.messages.contents.filter(
+    (msg) =>
+      msg.flags?.[MODULE_ID]?.question &&
+      msg.flags?.[MODULE_ID]?.answer
+  );
+
+  // Pega as últimas N trocas
+  const recent = wyvMessages.slice(-historySize);
+
+  // Monta no formato esperado pelo OpenAI: [{role, content}, ...]
+  const history = [];
+  for (const msg of recent) {
+    history.push({ role: "user",      content: msg.flags[MODULE_ID].question });
+    history.push({ role: "assistant", content: msg.flags[MODULE_ID].answer   });
+  }
+
+  return history;
+}
+
 // ─── Contexto do Personagem ───────────────────────────────────────────────────
 
 function _getActorContext() {
-  // Usa o token selecionado no canvas
   const token = canvas.tokens?.controlled?.[0];
   const actor = token?.actor;
 
   if (!actor) return null;
 
   const sys = actor.system;
-
-  // Extrai dados genéricos que funcionam para dnd5e e sistemas similares
   const context = { name: actor.name };
 
-  // Nível e classe (dnd5e 5.5 e versões anteriores)
   if (sys.details?.level !== undefined) {
     context.level = sys.details.level;
   } else if (sys.details?.cr !== undefined) {
     context.cr = sys.details.cr;
   }
 
-  // Classe principal (primeiro item do tipo 'class')
   const classItem = actor.items?.find((i) => i.type === "class");
   if (classItem) context.class = classItem.name;
 
-  // Espécie/raça
   context.species =
     sys.details?.species?.value ??
     sys.details?.species ??
     sys.details?.race ??
     null;
 
-  // Atributos (abilities)
   if (sys.abilities) {
     context.abilities = {};
     for (const [key, val] of Object.entries(sys.abilities)) {
-      context.abilities[key] = {
-        value: val.value,
-        mod:   val.mod,
-      };
+      context.abilities[key] = { value: val.value, mod: val.mod };
     }
   }
 
-  // HP
   if (sys.attributes?.hp) {
-    context.hp = {
-      value: sys.attributes.hp.value,
-      max:   sys.attributes.hp.max,
-    };
+    context.hp = { value: sys.attributes.hp.value, max: sys.attributes.hp.max };
   }
 
-  // CA
   if (sys.attributes?.ac?.value !== undefined) {
     context.ac = sys.attributes.ac.value;
   }
 
-  // Remove chaves com valor null/undefined para deixar o payload limpo
   return _cleanObject(context);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Posta uma mensagem OOC no chat como Wyv.
- * @param {string}  content   HTML da mensagem
- * @param {boolean} temporary Não exibe som de notificação
+ * Posta uma mensagem OOC no chat como (IA) Wyv.
+ * @param {string}      content    HTML da mensagem
+ * @param {boolean}     temporary  Suprime som de notificação
+ * @param {object|null} wyvFlags   Dados extras salvos nos flags (question/answer)
  */
-async function _postChatMessage(content, temporary = false) {
+async function _postChatMessage(content, temporary = false, wyvFlags = null) {
   const msgData = {
     content,
-    speaker: { alias: "🐉 Wyv" },
-    // OOC = "Out of Character" — mensagem discreta fora do roleplay
+    speaker: { alias: "(IA) Wyv" },
     type: CONST.CHAT_MESSAGE_TYPES?.OOC ?? CONST.CHAT_MESSAGE_STYLES?.OOC ?? 2,
     sound: temporary ? null : CONFIG.sounds.notification,
-    flags: { [MODULE_ID]: { isWyvMessage: true } },
+    flags: {
+      [MODULE_ID]: {
+        isWyvMessage: true,
+        ...wyvFlags,
+      },
+    },
   };
 
   return ChatMessage.create(msgData);
 }
 
-/** Formata a resposta final com a pergunta original para contexto */
 function _formatResponse(question, answer) {
   return `
     <div class="wyv-response">
@@ -207,7 +242,6 @@ function _formatResponse(question, answer) {
   `;
 }
 
-/** Converte markdown simples para HTML (bold, italic, listas) */
 function _markdownToHtml(text) {
   return text
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
@@ -217,7 +251,6 @@ function _markdownToHtml(text) {
     .replace(/\n/g,            "<br>");
 }
 
-/** Remove recursivamente chaves null/undefined de um objeto */
 function _cleanObject(obj) {
   return Object.fromEntries(
     Object.entries(obj).filter(([, v]) => v !== null && v !== undefined)
