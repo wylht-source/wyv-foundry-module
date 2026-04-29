@@ -34,6 +34,14 @@
   color: #5a3e8a;
 }
 
+.wyv-header {
+  font-weight: bold;
+  font-size: 0.85em;
+  color: #7b5ea7;
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+}
+
 .wyv-error {
   color: #c0392b;
   font-size: 0.88em;

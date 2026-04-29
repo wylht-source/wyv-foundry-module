@@ -198,8 +198,15 @@ async function _handleWyvRequest(userMessage) {
   } catch (error) {
     console.error(`${MODULE_ID} | API error:`, error);
     await waitingMsg?.delete();
+
+    // Extrai a mensagem de erro de forma segura independente do tipo
+    const errMsg =
+      typeof error === "string"
+        ? error
+        : error?.message || error?.detail || JSON.stringify(error) || "Unknown error";
+
     await _postChatMessage(
-      `<span class="wyv-error">${t("chat.error")}: ${error.message}</span>`
+      `<span class="wyv-error">${t("chat.error")}: ${errMsg}</span>`
     );
   }
 }
@@ -246,11 +253,17 @@ function _getActorContext() {
   const classItem = actor.items?.find((i) => i.type === "class");
   if (classItem) context.class = classItem.name;
 
-  context.species =
-    sys.details?.species?.value ??
-    sys.details?.species ??
-    sys.details?.race ??
-    null;
+  // dnd5e 5.0+ retorna species como objeto completo da raça — extrai só o nome
+  const speciesRaw = sys.details?.species ?? sys.details?.race ?? null;
+  if (typeof speciesRaw === "string") {
+    context.species = speciesRaw;
+  } else if (speciesRaw?.name) {
+    context.species = speciesRaw.name;
+  } else if (typeof speciesRaw?.value === "string") {
+    context.species = speciesRaw.value;
+  } else {
+    context.species = null;
+  }
 
   if (sys.abilities) {
     context.abilities = {};
@@ -273,10 +286,12 @@ function _getActorContext() {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async function _postChatMessage(content, temporary = false, wyvFlags = null) {
+  // Compatível com Foundry v11, v12 e v13
+  const isV13 = game.release?.generation >= 13;
+
   const msgData = {
     content,
-    speaker: { alias: "(IA) Wyv" },
-    type:    CONST.CHAT_MESSAGE_TYPES?.OOC ?? CONST.CHAT_MESSAGE_STYLES?.OOC ?? 2,
+    speaker: ChatMessage.getSpeaker({ alias: "(IA) Wyv" }),
     sound:   temporary ? null : CONFIG.sounds.notification,
     flags: {
       [MODULE_ID]: {
@@ -286,12 +301,20 @@ async function _postChatMessage(content, temporary = false, wyvFlags = null) {
     },
   };
 
+  // v13 usa 'style', versões anteriores usam 'type'
+  if (isV13) {
+    msgData.style = CONST.CHAT_MESSAGE_STYLES?.OOC ?? 2;
+  } else {
+    msgData.type = CONST.CHAT_MESSAGE_TYPES?.OOC ?? 2;
+  }
+
   return ChatMessage.create(msgData);
 }
 
 function _formatResponse(question, answer) {
   return `
     <div class="wyv-response">
+      <div class="wyv-header">🐉 (IA) Wyv</div>
       <div class="wyv-question">❓ ${question}</div>
       <div class="wyv-answer">${_markdownToHtml(answer)}</div>
     </div>
