@@ -1,0 +1,26 @@
+{
+  "id": "wyv",
+  "title": "Wyv — RPG Assistant",
+  "description": "Assistente de RPG integrado ao chat do FoundryVTT. Digite @wyv seguido da sua dúvida.",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "11",
+    "verified": "12"
+  },
+  "authors": [
+    {
+      "name": "Wyl",
+      "discord": ""
+    }
+  ],
+  "scripts": [
+    "scripts/wyv.js"
+  ],
+  "styles": [
+    "styles/wyv.css"
+  ],
+  "languages": [],
+  "url": "https://github.com/wylht-source/wyv-foundry-module",
+  "manifest": "https://raw.githubusercontent.com/wylht-source/wyv-foundry-module/main/module.json",
+  "download": "https://github.com/wylht-source/wyv-foundry-module/releases/latest/download/wyv.zip"
+}
