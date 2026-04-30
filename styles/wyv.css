@@ -46,3 +46,65 @@
   color: #c0392b;
   font-size: 0.88em;
 }
+
+/* ── Tela de permissões de jogadores ────────────────────────────────────── */
+
+.wyv-perm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.wyv-perm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(123, 94, 167, 0.05);
+  border: 1px solid rgba(123, 94, 167, 0.15);
+}
+
+.wyv-perm-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid #ccc;
+}
+
+.wyv-perm-name {
+  flex: 1;
+  font-size: 0.92em;
+  font-weight: 500;
+}
+
+.wyv-perm-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #7b5ea7;
+  cursor: pointer;
+}
+
+.wyv-perm-footer {
+  padding: 10px 12px;
+  text-align: right;
+  border-top: 1px solid #ddd;
+}
+
+.wyv-perm-footer button {
+  background: #7b5ea7;
+  color: white;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.wyv-perm-footer button:hover {
+  background: #5a3e8a;
+}
